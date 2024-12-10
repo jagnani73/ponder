@@ -13,7 +13,6 @@ import { getNextAvailablePort } from "@/utils/port.js";
 import { type Result, mergeResults } from "@/utils/result.js";
 import { serialize } from "@/utils/serialize.js";
 import { glob } from "glob";
-import type { GraphQLSchema } from "graphql";
 import type { Hono } from "hono";
 import { createServer } from "vite";
 import { ViteNodeRunner } from "vite-node/client";
@@ -41,7 +40,6 @@ export type PreBuild = {
 export type SchemaBuild = {
   schema: Schema;
   statements: SqlStatements;
-  graphqlSchema: GraphQLSchema;
 };
 
 export type IndexingBuild = {
@@ -426,7 +424,6 @@ export const createBuild = async ({
         result: {
           schema,
           statements: buildSchemaResult.statements,
-          graphqlSchema: buildSchemaResult.graphqlSchema,
         },
       } as const;
     },
