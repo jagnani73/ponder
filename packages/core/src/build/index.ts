@@ -10,6 +10,7 @@ import type { Schema } from "@/drizzle/index.js";
 import type { SqlStatements } from "@/drizzle/kit/index.js";
 import type { PonderRoutes } from "@/hono/index.js";
 import type { Source } from "@/sync/source.js";
+import { getNextAvailablePort } from "@/utils/port.js";
 import { type Result, mergeResults } from "@/utils/result.js";
 import { serialize } from "@/utils/serialize.js";
 import { glob } from "glob";
@@ -52,6 +53,8 @@ export type IndexingBuild = {
 };
 
 export type ApiBuild = {
+  hostname?: string;
+  port: number;
   app: Hono;
   routes: PonderRoutes;
 };
@@ -98,7 +101,7 @@ export type Build = {
       ExecuteResult["apiResult"],
       { status: "success" }
     >["result"];
-  }) => Result<ApiBuild>;
+  }) => Promise<Result<ApiBuild>>;
   startDev: (params: {
     onBuild: (buildResult: BuildResultDev) => void;
   }) => void;
@@ -486,7 +489,7 @@ export const createBuild = async ({
         },
       } as const;
     },
-    compileApi({ apiResult }) {
+    async compileApi({ apiResult }) {
       for (const {
         pathOrHandlers: [maybePathOrHandler],
       } of apiResult.routes) {
@@ -510,11 +513,15 @@ export const createBuild = async ({
         }
       }
 
+      const port = await getNextAvailablePort({ common });
+
       return {
         status: "success",
         result: {
           app: apiResult.app,
           routes: apiResult.routes,
+          hostname: common.options.hostname,
+          port,
         },
       };
     },
@@ -613,8 +620,12 @@ export const createBuild = async ({
             return;
           }
 
+          const compileResult = await this.compileApi({
+            apiResult: executeResult.result,
+          });
+
           onBuild({
-            ...this.compileApi({ apiResult: executeResult.result }),
+            ...compileResult,
             kind: "api",
           });
         } else {
@@ -679,7 +690,7 @@ export const createBuild = async ({
               schemaResult: schemaResult.result,
               indexingResult: indexingResult.result,
             }),
-            build.compileApi({ apiResult: apiResult.result }),
+            await build.compileApi({ apiResult: apiResult.result }),
           ]);
 
           if (compileResult.status === "error") {

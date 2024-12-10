@@ -13,41 +13,23 @@ import { createServer } from "./index.js";
 beforeEach(setupCommon);
 beforeEach(setupIsolatedDatabase);
 
-test("port", async (context) => {
-  const { database, cleanup } = await setupDatabaseServices(context);
-
-  const server1 = await createServer({
-    common: context.common,
-    schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
-    database,
-  });
-
-  const server2 = await createServer({
-    common: context.common,
-    schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
-    database,
-  });
-
-  expect(server2.port).toBeGreaterThanOrEqual(server1.port + 1);
-
-  await server1.kill();
-  await server2.kill();
-  await cleanup();
-});
-
 test("listens on ipv4", async (context) => {
   const { database, cleanup } = await setupDatabaseServices(context);
 
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
+    apiBuild: {
+      app: new Hono(),
+      routes: [],
+      port: context.common.options.port,
+    },
     database,
   });
 
-  const response = await fetch(`http://localhost:${server.port}/health`);
+  const response = await fetch(
+    `http://localhost:${context.common.options.port}/health`,
+  );
   expect(response.status).toBe(200);
 
   await server.kill();
@@ -60,11 +42,17 @@ test("listens on ipv6", async (context) => {
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
+    apiBuild: {
+      app: new Hono(),
+      routes: [],
+      port: context.common.options.port,
+    },
     database,
   });
 
-  const response = await fetch(`http://[::1]:${server.port}/health`);
+  const response = await fetch(
+    `http://[::1]:${context.common.options.port}/health`,
+  );
   expect(response.status).toBe(200);
 
   await server.kill();
@@ -77,7 +65,11 @@ test("not ready", async (context) => {
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
+    apiBuild: {
+      app: new Hono(),
+      routes: [],
+      port: context.common.options.port,
+    },
     database,
   });
 
@@ -95,7 +87,11 @@ test("ready", async (context) => {
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
+    apiBuild: {
+      app: new Hono(),
+      routes: [],
+      port: context.common.options.port,
+    },
     database,
   });
 
@@ -117,7 +113,11 @@ test("health", async (context) => {
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
+    apiBuild: {
+      app: new Hono(),
+      routes: [],
+      port: context.common.options.port,
+    },
     database,
   });
 
@@ -135,7 +135,11 @@ test("healthy PUT", async (context) => {
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
+    apiBuild: {
+      app: new Hono(),
+      routes: [],
+      port: context.common.options.port,
+    },
     database,
   });
 
@@ -155,7 +159,11 @@ test("metrics", async (context) => {
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
+    apiBuild: {
+      app: new Hono(),
+      routes: [],
+      port: context.common.options.port,
+    },
     database,
   });
 
@@ -173,7 +181,11 @@ test("metrics error", async (context) => {
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
+    apiBuild: {
+      app: new Hono(),
+      routes: [],
+      port: context.common.options.port,
+    },
     database,
   });
 
@@ -194,7 +206,11 @@ test("metrics PUT", async (context) => {
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
+    apiBuild: {
+      app: new Hono(),
+      routes: [],
+      port: context.common.options.port,
+    },
     database,
   });
 
@@ -214,7 +230,11 @@ test("metrics unmatched route", async (context) => {
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
+    apiBuild: {
+      app: new Hono(),
+      routes: [],
+      port: context.common.options.port,
+    },
     database,
   });
 
@@ -238,7 +258,11 @@ test("missing route", async (context) => {
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
+    apiBuild: {
+      app: new Hono(),
+      routes: [],
+      port: context.common.options.port,
+    },
     database,
   });
 
@@ -264,6 +288,7 @@ test("custom api route", async (context) => {
           pathOrHandlers: ["/hi", (c: Context) => c.text("hi")],
         },
       ],
+      port: context.common.options.port,
     },
     database,
   });
@@ -285,7 +310,7 @@ test("custom hono route", async (context) => {
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app, routes: [] },
+    apiBuild: { app, routes: [], port: context.common.options.port },
     database,
   });
 
@@ -306,7 +331,11 @@ test.skip("kill", async (context) => {
   const server = await createServer({
     common: context.common,
     schemaBuild: { graphqlSchema: buildGraphQLSchema({}) },
-    apiBuild: { app: new Hono(), routes: [] },
+    apiBuild: {
+      app: new Hono(),
+      routes: [],
+      port: context.common.options.port,
+    },
     database,
   });
 

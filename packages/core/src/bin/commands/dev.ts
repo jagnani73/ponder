@@ -174,7 +174,7 @@ export async function dev({ cliOptions }: { cliOptions: CliOptions }) {
       schemaResult: executeResult.schemaResult.result,
       indexingResult: executeResult.indexingResult.result,
     }),
-    build.compileApi({ apiResult: executeResult.apiResult.result }),
+    await build.compileApi({ apiResult: executeResult.apiResult.result }),
   ]);
 
   if (initialBuildResult.status === "error") {
