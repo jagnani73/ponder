@@ -1,10 +1,7 @@
 import http from "node:http";
 import type { ApiBuild } from "@/build/index.js";
-import type { SchemaBuild } from "@/build/index.js";
 import type { Common } from "@/common/common.js";
 import type { Database } from "@/database/index.js";
-import { graphql } from "@/graphql/middleware.js";
-import { applyHonoRoutes } from "@/hono/index.js";
 import { getMetadataStore } from "@/indexing-store/metadata.js";
 import { startClock } from "@/utils/timer.js";
 import { serve } from "@hono/node-server";
@@ -22,12 +19,10 @@ type Server = {
 export async function createServer({
   common,
   database,
-  schemaBuild,
   apiBuild,
 }: {
   common: Common;
   database: Database;
-  schemaBuild: Pick<SchemaBuild, "graphqlSchema">;
   apiBuild: ApiBuild;
 }): Promise<Server> {
   // Create hono app
@@ -80,14 +75,6 @@ export async function createServer({
     }
   });
 
-  // context required for graphql middleware and hono middleware
-  const contextMiddleware = createMiddleware(async (c, next) => {
-    c.set("db", database.drizzle);
-    c.set("metadataStore", metadataStore);
-    c.set("graphqlSchema", schemaBuild.graphqlSchema);
-    await next();
-  });
-
   const hono = new Hono()
     .use(metricsMiddleware)
     .use(cors({ origin: "*", maxAge: 86400 }))
@@ -119,28 +106,8 @@ export async function createServer({
 
       return c.json(status);
     })
-    .use(contextMiddleware);
-
-  if (apiBuild.routes.length === 0 && apiBuild.app.routes.length === 0) {
-    // apply graphql middleware if no custom api exists
-    hono.use("/graphql", graphql());
-    hono.use("/", graphql());
-  } else {
-    // apply user routes to hono instance, registering a custom error handler
-    applyHonoRoutes(hono, apiBuild.routes, {
-      db: database.drizzle,
-    }).onError((error, c) => onError(error, c, common));
-
-    common.logger.debug({
-      service: "server",
-      msg: `Detected a custom server with routes: [${apiBuild.routes
-        .map(({ pathOrHandlers: [maybePathOrHandler] }) => maybePathOrHandler)
-        .filter((maybePathOrHandler) => typeof maybePathOrHandler === "string")
-        .join(", ")}]`,
-    });
-
-    hono.route("/", apiBuild.app);
-  }
+    .route("/", apiBuild.app)
+    .onError((error, c) => onError(error, c, common));
 
   // Create nodejs server
 

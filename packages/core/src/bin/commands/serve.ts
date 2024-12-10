@@ -108,7 +108,6 @@ export async function serve({ cliOptions }: { cliOptions: CliOptions }) {
   const server = await createServer({
     common,
     database,
-    schemaBuild,
     apiBuild,
   });
 

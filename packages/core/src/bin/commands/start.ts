@@ -132,7 +132,6 @@ export async function start({ cliOptions }: { cliOptions: CliOptions }) {
   cleanupReloadableServer = await runServer({
     common,
     database,
-    schemaBuild,
     apiBuild,
   });
 
