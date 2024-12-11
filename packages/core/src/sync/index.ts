@@ -12,6 +12,7 @@ import {
   createRealtimeSync,
 } from "@/sync-realtime/index.js";
 import type { SyncStore } from "@/sync-store/index.js";
+import type { Trace } from "@/types/eth.js";
 import type { LightBlock, SyncBlock } from "@/types/sync.js";
 import {
   type Checkpoint,
@@ -40,7 +41,10 @@ import { startClock } from "@/utils/timer.js";
 import {
   type Address,
   type Hash,
+  type Hex,
+  type TransactionReceipt,
   type Transport,
+  checksumAddress,
   hexToBigInt,
   hexToNumber,
 } from "viem";
@@ -51,6 +55,7 @@ import {
   type Filter,
   type Source,
   isAddressFactory,
+  shouldGetTransactionReceipt,
 } from "./source.js";
 import { cachedTransport } from "./transport.js";
 
@@ -382,6 +387,7 @@ export const createSync = async (args: CreateSyncParameters): Promise<Sync> => {
    * The generator is "completed" when all event have been extracted
    * before the minimum finalized checkpoint (supremum).
    */
+  const USE_REMOTE = true;
   async function* getEvents() {
     let cursor: string;
 
@@ -397,31 +403,45 @@ export const createSync = async (args: CreateSyncParameters): Promise<Sync> => {
         );
         const filters = sources.map(({ filter }) => filter);
 
-        const localSyncGenerator = getLocalSyncGenerator({
-          common: args.common,
-          syncStore: args.syncStore,
-          network,
-          requestQueue,
-          sources,
-          filters,
-          syncProgress,
-          historicalSync,
-          onFatalError: args.onFatalError,
-        });
+        if (USE_REMOTE) {
+          return getRemoteEventGenerator({
+            syncProgress,
+            filters,
+            from:
+              args.initialCheckpoint !== encodeCheckpoint(zeroCheckpoint)
+                ? args.initialCheckpoint
+                : getChainCheckpoint({ syncProgress, network, tag: "start" })!,
+            to,
+            batch: 10000,
+            common: args.common,
+            network,
+          });
+        } else {
+          const localSyncGenerator = getLocalSyncGenerator({
+            common: args.common,
+            syncStore: args.syncStore,
+            network,
+            requestQueue,
+            sources,
+            filters,
+            syncProgress,
+            historicalSync,
+            onFatalError: args.onFatalError,
+          });
 
-        const localEventGenerator = getLocalEventGenerator({
-          syncStore: args.syncStore,
-          filters,
-          localSyncGenerator,
-          from:
-            args.initialCheckpoint !== encodeCheckpoint(zeroCheckpoint)
-              ? args.initialCheckpoint
-              : getChainCheckpoint({ syncProgress, network, tag: "start" })!,
-          to,
-          batch: 1000,
-        });
-
-        return bufferAsyncGenerator(localEventGenerator, 2);
+          const localEventGenerator = getLocalEventGenerator({
+            syncStore: args.syncStore,
+            filters,
+            localSyncGenerator,
+            from:
+              args.initialCheckpoint !== encodeCheckpoint(zeroCheckpoint)
+                ? args.initialCheckpoint
+                : getChainCheckpoint({ syncProgress, network, tag: "start" })!,
+            to,
+            batch: 1000,
+          });
+          return bufferAsyncGenerator(localEventGenerator, 2);
+        }
       },
     );
 
@@ -1073,6 +1093,312 @@ export async function* getLocalEventGenerator(params: {
         estimateSeconds = Math.max(10, Math.round(estimateSeconds / 10));
         if (++consecutiveErrors > 4) throw error;
       }
+    }
+  }
+}
+
+const REMOTE_SYNC_API_URL = "http://sync-api.default.svc.cluster.local:8083";
+export async function getRemoteEvents({
+  filters,
+  from,
+  to,
+  limit,
+  common,
+  network,
+}: {
+  filters: Filter[];
+  from: string;
+  to: string;
+  limit: number;
+  common: Common;
+  network: Network;
+}): Promise<{
+  events: RawEvent[];
+  cursor: string;
+}> {
+  const endClock = startClock();
+
+  // clean up filters column
+  for (const filter of filters) {
+    if (filter.include) {
+      const includes = [];
+      for (const col of filter.include) {
+        switch (col) {
+          case "log.id":
+            break;
+          case "log.logIndex":
+            includes.push("log.index");
+            break;
+          case "log.topics":
+            includes.push("log.topic0");
+            includes.push("log.topic1");
+            includes.push("log.topic2");
+            includes.push("log.topic3");
+            break;
+          case "transaction.transactionIndex":
+            includes.push("transaction.index");
+            break;
+          default:
+            includes.push(col);
+        }
+      }
+      // @ts-expect-error: filter.include is not typed
+      filter.include = includes;
+    }
+  }
+
+  const body = JSON.stringify({ filters, from, to, limit });
+  //console.log("Calling Remote Sync API:", { body });
+  const response = await fetch(
+    `${REMOTE_SYNC_API_URL}/events/${network.chainId}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    },
+  );
+  const json = await response.json();
+
+  common.metrics.ponder_remote_sync_duration.observe(
+    { network: network.name, method: "getEvents" },
+    endClock(),
+  );
+  //console.log("Response:", json);
+  const { events: syncEvents, cursor } = json as {
+    events: any[];
+    cursor: string;
+  };
+
+  //console.log(`Fetched sync events: ${syncEvents.length}`);
+  const events: RawEvent[] = [];
+  for (const row of syncEvents) {
+    const sourceIndex = Number(row.filterId);
+    const filter = filters[sourceIndex]!;
+
+    const hasLog = row.log_index !== null && row.log_index !== undefined;
+    const hasTransaction =
+      row.transaction_index !== null && row.transaction_index !== undefined;
+    const hasTrace = row.trace_index !== null && row.trace_index !== undefined;
+    const hasTransactionReceipt = shouldGetTransactionReceipt(filter);
+
+    const event: RawEvent = {
+      chainId: filter.chainId,
+      sourceIndex,
+      checkpoint: row.checkpoint,
+      block: {
+        baseFeePerGas: row.block_baseFeePerGas
+          ? BigInt(row.block_baseFeePerGas)
+          : null,
+        difficulty: BigInt(row.block_difficulty),
+        extraData: row.block_extraData,
+        gasLimit: BigInt(row.block_gasLimit),
+        gasUsed: BigInt(row.block_gasUsed),
+        hash: row.block_hash,
+        logsBloom: row.block_logsBloom,
+        miner: checksumAddress(row.block_miner),
+        mixHash: row.block_mixHash,
+        nonce: row.block_nonce,
+        number: BigInt(row.block_number),
+        parentHash: row.block_parentHash,
+        receiptsRoot: row.block_receiptsRoot,
+        sha3Uncles: row.block_sha3Uncles,
+        size: BigInt(row.block_size),
+        stateRoot: row.block_stateRoot,
+        timestamp: BigInt(row.block_timestamp),
+        totalDifficulty: row.block_totalDifficulty
+          ? BigInt(row.block_totalDifficulty)
+          : null,
+        transactionsRoot: row.block_transactionsRoot,
+      },
+      log: hasLog
+        ? {
+            address: checksumAddress(row.log_address!),
+            data: row.log_data,
+            id: `${row.transaction_hash}-${row.log_index}`,
+            logIndex: Number(row.log_index),
+            removed: false,
+            topics: [
+              row.log_topic0,
+              row.log_topic1,
+              row.log_topic2,
+              row.log_topic3,
+            ].filter((t): t is Hex => t !== null) as [Hex, ...Hex[]] | [],
+          }
+        : undefined,
+      transaction: hasTransaction
+        ? {
+            from: checksumAddress(row.transaction_from),
+            gas: BigInt(row.transaction_gas),
+            hash: row.transaction_hash,
+            input: row.transaction_input,
+            nonce: Number(row.transaction_nonce),
+            r: row.transaction_r,
+            s: row.transaction_s,
+            to: row.transaction_to
+              ? checksumAddress(row.transaction_to)
+              : row.transaction_to,
+            transactionIndex: Number(row.transaction_index),
+            value: BigInt(row.transaction_value),
+            v: row.transaction_v ? BigInt(row.transaction_v) : null,
+            ...(row.transaction_type === "0x0"
+              ? {
+                  type: "legacy",
+                  gasPrice: BigInt(row.transaction_gasPrice),
+                }
+              : row.transaction_type === "0x1"
+                ? {
+                    type: "eip2930",
+                    gasPrice: BigInt(row.transaction_gasPrice),
+                    accessList: JSON.parse(row.transaction_accessList),
+                  }
+                : row.transaction_type === "0x2"
+                  ? {
+                      type: "eip1559",
+                      maxFeePerGas: BigInt(row.transaction_maxFeePerGas),
+                      maxPriorityFeePerGas: BigInt(
+                        row.transaction_maxPriorityFeePerGas,
+                      ),
+                    }
+                  : row.transaction_type === "0x7e"
+                    ? {
+                        type: "deposit",
+                        maxFeePerGas:
+                          row.transaction_maxFeePerGas !== null
+                            ? BigInt(row.transaction_maxFeePerGas)
+                            : undefined,
+                        maxPriorityFeePerGas:
+                          row.transaction_maxPriorityFeePerGas !== null
+                            ? BigInt(row.transaction_maxPriorityFeePerGas)
+                            : undefined,
+                      }
+                    : {
+                        type: row.transaction_type,
+                      }),
+          }
+        : undefined,
+      trace: hasTrace
+        ? {
+            id: `${row.transaction_hash}-${row.trace_index}`,
+            type: row.trace_callType as Trace["type"],
+            from: checksumAddress(row.trace_from),
+            to: checksumAddress(row.trace_to),
+            gas: BigInt(row.trace_gas),
+            gasUsed: BigInt(row.trace_gasUsed),
+            input: row.trace_input,
+            output: row.trace_output,
+            value: BigInt(row.trace_value),
+            traceIndex: Number(row.trace_index),
+            subcalls: Number(row.trace_subcalls),
+          }
+        : undefined,
+      transactionReceipt: hasTransactionReceipt
+        ? {
+            contractAddress: row.transaction_contractAddress
+              ? checksumAddress(row.transaction_contractAddress)
+              : null,
+            cumulativeGasUsed: BigInt(row.transaction_cumulativeGasUsed),
+            effectiveGasPrice: BigInt(row.transaction_effectiveGasPrice),
+            from: checksumAddress(row.transaction_from),
+            gasUsed: BigInt(row.transaction_gasUsed),
+            logsBloom: row.transaction_logsBloom,
+            status:
+              row.transaction_status === "0x1"
+                ? "success"
+                : row.transaction_status === "0x0"
+                  ? "reverted"
+                  : (row.transaction_status as TransactionReceipt["status"]),
+            to: row.transaction_to ? checksumAddress(row.transaction_to) : null,
+            type:
+              row.transaction_type === "0x0"
+                ? "legacy"
+                : row.transaction_type === "0x1"
+                  ? "eip2930"
+                  : row.transaction_type === "0x2"
+                    ? "eip1559"
+                    : row.transaction_type === "0x7e"
+                      ? "deposit"
+                      : row.transaction_type,
+          }
+        : undefined,
+    } satisfies RawEvent;
+
+    events.push(event);
+  }
+
+  return { events, cursor };
+}
+
+const minBigInt = (a: bigint, b: bigint) => (a < b ? a : b);
+
+export async function* getRemoteEventGenerator(params: {
+  syncProgress: SyncProgress;
+  filters: Filter[];
+  from: string;
+  to: string;
+  batch: number;
+  common: Common;
+  network: Network;
+}): AsyncGenerator<{
+  events: RawEvent[];
+  checkpoint: string;
+}> {
+  let cursor = params.from;
+  // Estimate optimal range (blocks) to query at a time, eventually
+  // used to determine `to` passed to `getEvents`.
+  let estimateBlocks = 20_000;
+
+  const finalBlockNumber = decodeCheckpoint(params.to).blockNumber;
+
+  params.syncProgress.current = params.syncProgress.end;
+
+  let consecutiveErrors = 0;
+  while (cursor < params.to) {
+    const toBlockNumber = minBigInt(
+      decodeCheckpoint(cursor).blockNumber + BigInt(estimateBlocks),
+      finalBlockNumber,
+    );
+    const to =
+      toBlockNumber === finalBlockNumber
+        ? params.to
+        : encodeCheckpoint({
+            blockTimestamp: zeroCheckpoint.blockTimestamp,
+            chainId: BigInt(params.network.chainId),
+            blockNumber: toBlockNumber,
+            transactionIndex: maxCheckpoint.transactionIndex,
+            eventType: maxCheckpoint.eventType,
+            eventIndex: maxCheckpoint.eventIndex,
+          });
+    try {
+      const { events, cursor: queryCursor } = await getRemoteEvents({
+        filters: params.filters,
+        from: cursor,
+        to: to,
+        limit: params.batch,
+        common: params.common,
+        network: params.network,
+      });
+
+      estimateBlocks = estimate({
+        from: Number(decodeCheckpoint(cursor).blockNumber),
+        to: Number(decodeCheckpoint(queryCursor).blockNumber),
+        target: params.batch,
+        result: events.length,
+        min: 1_000,
+        max: 50_000,
+        prev: estimateBlocks,
+        maxIncrease: 1.08,
+      });
+      cursor = queryCursor;
+
+      if (events.length > 0) {
+        let lastCheckpoint = events.at(-1)!.checkpoint;
+        if (cursor > lastCheckpoint) lastCheckpoint = cursor;
+        yield { events, checkpoint: lastCheckpoint };
+      }
+    } catch (error) {
+      // Handle errors by reducing the requested range by 10x
+      estimateBlocks = Math.max(10, Math.round(estimateBlocks / 10));
+      if (++consecutiveErrors > 4) throw error;
     }
   }
 }
