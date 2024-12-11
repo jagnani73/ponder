@@ -42,6 +42,8 @@ export class MetricsService {
   ponder_database_method_duration: prometheus.Histogram<"service" | "method">;
   ponder_database_method_error_total: prometheus.Counter<"service" | "method">;
 
+  ponder_remote_sync_duration: prometheus.Histogram<"network" | "method">;
+
   ponder_http_server_port: prometheus.Gauge;
   ponder_http_server_active_requests: prometheus.Gauge<"method" | "path">;
   ponder_http_server_request_duration_ms: prometheus.Histogram<
@@ -167,6 +169,14 @@ export class MetricsService {
       name: "ponder_database_method_error_total",
       help: "Total number of errors encountered during database operations",
       labelNames: ["service", "method"] as const,
+      registers: [this.registry],
+    });
+
+    this.ponder_remote_sync_duration = new prometheus.Histogram({
+      name: "ponder_remote_sync_duration",
+      help: "Duration of remote sync requests",
+      labelNames: ["network", "method"] as const,
+      buckets: httpRequestDurationMs,
       registers: [this.registry],
     });
 
