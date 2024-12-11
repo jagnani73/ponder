@@ -1031,6 +1031,7 @@ export async function* getLocalEventGenerator(params: {
   for await (const syncCheckpoint of getNonBlockingAsyncGenerator(
     params.localSyncGenerator,
   )) {
+    let consecutiveErrors = 0;
     while (cursor < min(syncCheckpoint, params.to)) {
       const to = min(
         syncCheckpoint,
@@ -1044,7 +1045,6 @@ export async function* getLocalEventGenerator(params: {
         }),
       );
 
-      let consecutiveErrors = 0;
       try {
         const { events, cursor: queryCursor } =
           await params.syncStore.getEvents({
