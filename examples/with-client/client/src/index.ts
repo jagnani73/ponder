@@ -10,3 +10,8 @@ const response = await client.db
   .limit(10);
 
 console.log({ response });
+
+const { unsubscribe } = client.live(
+  (db) => db.select().from(schema.account).limit(10),
+  (result) => console.log({ result }),
+);

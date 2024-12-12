@@ -6,18 +6,24 @@ type Prettify<T> = {
   [K in keyof T]: T[K];
 } & {};
 
+type ClientDb<schema extends Schema> = Prettify<
+  Omit<
+    PgRemoteDatabase<schema>,
+    | "insert"
+    | "update"
+    | "delete"
+    | "transaction"
+    | "refreshMaterializedView"
+    | "_"
+  >
+>;
+
 export type Client<schema extends Schema = Schema> = {
-  db: Prettify<
-    Omit<
-      PgRemoteDatabase<schema>,
-      | "insert"
-      | "update"
-      | "delete"
-      | "transaction"
-      | "refreshMaterializedView"
-      | "_"
-    >
-  >;
+  db: ClientDb<schema>;
+  live: <result>(
+    query: (db: ClientDb<schema>) => Promise<result>,
+    callback: (result: result) => void | Promise<void>,
+  ) => { unsubscribe: () => void };
 };
 
 export const createClient = <schema extends Schema>(
@@ -36,5 +42,10 @@ export const createClient = <schema extends Schema>(
     { schema, casing: "snake_case" },
   );
 
-  return { db };
+  return {
+    db,
+    live() {
+      return { unsubscribe: () => {} };
+    },
+  };
 };
