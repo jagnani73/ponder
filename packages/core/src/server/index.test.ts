@@ -259,27 +259,6 @@ test("missing route", async (context) => {
   await cleanup();
 });
 
-test("custom api route", async (context) => {
-  const { database, cleanup } = await setupDatabaseServices(context);
-
-  const server = await createServer({
-    common: context.common,
-    apiBuild: {
-      app: new Hono().get("/hi", (c) => c.text("hi")),
-      port: context.common.options.port,
-    },
-    database,
-  });
-
-  const response = await server.hono.request("/hi");
-
-  expect(response.status).toBe(200);
-  expect(await response.text()).toBe("hi");
-
-  await server.kill();
-  await cleanup();
-});
-
 test("custom hono route", async (context) => {
   const { database, cleanup } = await setupDatabaseServices(context);
 

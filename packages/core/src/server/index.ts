@@ -108,7 +108,7 @@ export async function createServer({
     })
     .use(
       createMiddleware(async (c, next) => {
-        c.set("db", database.drizzle);
+        c.set("db", database.qb.drizzleClient);
         await next();
       }),
     )

@@ -247,5 +247,15 @@ export namespace Virtual {
     ) => void;
   };
 
-  export type Drizzle<schema extends Schema> = _Drizzle<schema>;
+  export type Drizzle<schema extends Schema> = Prettify<
+    Omit<
+      _Drizzle<schema>,
+      | "insert"
+      | "update"
+      | "delete"
+      | "transaction"
+      | "refreshMaterializedView"
+      | "_"
+    >
+  >;
 }

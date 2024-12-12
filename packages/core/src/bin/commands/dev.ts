@@ -88,7 +88,7 @@ export async function dev({ cliOptions }: { cliOptions: CliOptions }) {
             await database.kill();
           }
 
-          database = createDatabase({
+          database = await createDatabase({
             common,
             preBuild: result.result.preBuild,
             schemaBuild: result.result.schemaBuild,
