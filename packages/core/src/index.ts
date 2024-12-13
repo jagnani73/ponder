@@ -30,6 +30,7 @@ export {
   primaryKey,
   hex,
   bigint,
+  type Drizzle,
 } from "@/drizzle/index.js";
 
 export { client } from "@/client/index.js";
