@@ -1,5 +1,11 @@
 # ponder
 
+## 0.8.9
+
+### Patch Changes
+
+- [#1375](https://github.com/ponder-sh/ponder/pull/1375) [`1687033a74fb8e7a7d843b4fe1f7f1cd4cf866a9`](https://github.com/ponder-sh/ponder/commit/1687033a74fb8e7a7d843b4fe1f7f1cd4cf866a9) Thanks [@typedarray](https://github.com/typedarray)! - Improved logs for Postgres pool errors.
+
 ## 0.8.8
 
 ### Patch Changes
